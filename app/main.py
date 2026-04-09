@@ -29,7 +29,8 @@ app = FastAPI(
     title="MediClinic API",
     description="A comprehensive clinic management system",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    servers=[{"url": "http://127.0.0.1:8000", "description": "Local development server"}]
 )
 
 app.add_middleware(
