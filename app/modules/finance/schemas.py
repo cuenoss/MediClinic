@@ -1,19 +1,22 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
 class Expense(BaseModel):
-  id: int
-  amount: float
-  category: str
-  date: str
-  description: str
+    id: int
+    amount: float
+    category: str
+    date: str
+    description: Optional[str] = None
 
 
 class ExpenseCreate(BaseModel):
-  amount: float
-  category: str
-  date: str
-  description: str
+    amount: float
+    category: str
+    date: str = ""
+    description: Optional[str] = None
+
 
 class ExpenseResponse(Expense):
     class Config:

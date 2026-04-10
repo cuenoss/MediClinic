@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from .models import Appointment
 from .schemas import AppointmentCreate
 from app.modules.patients.models import Patient
+from datetime import datetime
 
 router = APIRouter(tags=["appointments"])
 
@@ -14,56 +16,65 @@ async def create_appointment(
     appointment: AppointmentCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    patient = None
-    if appointment.patient_id:
-        result = await db.execute(select(Patient).where(Patient.id == appointment.patient_id))
-        patient = result.scalars().first()
+    try:
+        patient = None
+        if appointment.patient_id:
+            result = await db.execute(select(Patient).where(Patient.id == appointment.patient_id))
+            patient = result.scalars().first()
 
-    if not patient:
-        patient_result = await db.execute(select(Patient).where(Patient.phone == appointment.phone_number))
-        patient = patient_result.scalars().first()
+        if not patient:
+            patient_result = await db.execute(select(Patient).where(Patient.phone == appointment.phone_number))
+            patient = patient_result.scalars().first()
 
-    current_date = datetime.utcnow().date()
-    if not patient:
-        patient = Patient(
-            full_name=appointment.patient_name,
-            phone=appointment.phone_number,
-            created_at=current_date,
-            updated_at=current_date
+        current_date = datetime.utcnow().date()
+        if not patient:
+            patient = Patient(
+                full_name=appointment.patient_name,
+                phone=appointment.phone_number,
+                created_at=current_date,
+                updated_at=current_date
+            )
+            db.add(patient)
+            await db.flush()
+        else:
+            if not patient.full_name:
+                patient.full_name = appointment.patient_name
+            if not patient.phone:
+                patient.phone = appointment.phone_number
+            patient.updated_at = current_date
+
+        # Check if patient has an appointment at the same time
+        existing_result = await db.execute(
+            select(Appointment).where(
+                Appointment.patient_id == patient.id,
+                Appointment.time == appointment.time
+            )
         )
-        db.add(patient)
-        await db.flush()
-    else:
-        if not patient.full_name:
-            patient.full_name = appointment.patient_name
-        if not patient.phone:
-            patient.phone = appointment.phone_number
-        patient.updated_at = current_date
+        existing_appointment = existing_result.scalars().first()
+        if existing_appointment:
+            return {"message": "Patient already has an appointment at this time"}
 
-    existing_result = await db.execute(
-        select(Appointment).where(
-            Appointment.patient_id == patient.id,
-            Appointment.time == appointment.time
+        new_appointment = Appointment(
+            patient_id=patient.id,
+            time=appointment.time,
+            duration=appointment.duration,
+            type=appointment.type
         )
-    )
-    existing_appointment = existing_result.scalars().first()
-    if existing_appointment:
-        return {"message": "Patient already has an appointment"}
 
-    new_appointment = Appointment(
-        patient_id=patient.id,
-        time=appointment.time,
-        duration=appointment.duration,
-    )
-
-    db.add(new_appointment)
-    await db.commit()
-    await db.refresh(new_appointment)
-    return {
-        "message": "Appointment created successfully",
-        "appointment_id": new_appointment.id,
-        "patient_id": patient.id
-    }
+        db.add(new_appointment)
+        await db.commit()
+        await db.refresh(new_appointment)
+        return {
+            "message": "Appointment created successfully",
+            "appointment_id": new_appointment.id,
+            "patient_id": patient.id,
+        }
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Database error while creating the appointment. Check that PostgreSQL is running and the schema matches the models.",
+        )
 
 
 #get all the appointments 
@@ -82,6 +93,6 @@ async def delete_appointment(appointment_id: int, db: AsyncSession = Depends(get
     appointment = result.scalar_one_or_none()
     if appointment is None:
         return {"message": "Appointment not found"}
-    await db.delete(appointment)
+    db.delete(appointment)
     await db.commit()
     return {"message": "Appointment deleted successfully"}

@@ -7,6 +7,7 @@ class BaseSchema(BaseModel):
     class Config:
         from_attributes = True
 
+
 # Dashboard Stats (calculated in real-time)
 class DashboardStatsResponse(BaseSchema):
     total_patients: int
@@ -18,6 +19,36 @@ class DashboardStatsResponse(BaseSchema):
     active_patients: int
     new_patients_this_month: int
 
+
+class DashboardAppointmentItem(BaseModel):
+    """Today's appointments from the real Appointment model (time is a string, often ISO date prefix)."""
+
+    id: int
+    patient_id: int
+    time: str
+    duration: int
+    appointment_type: str
+    type: str  
+    patient_name: Optional[str] = None
+
+
+class DashboardRecentPatient(BaseModel):
+    id: int
+    full_name: str
+    name: str  
+    phone: str
+    email: Optional[str] = None
+    gender: Optional[str] = None
+    age: int = 0
+
+
+class DashboardOverviewResponse(BaseModel):
+    doctor_id: Optional[int] = None
+    stats: DashboardStatsResponse
+    today_appointments: List[DashboardAppointmentItem]
+    recent_patients: List[DashboardRecentPatient]
+
+
 # Recent Activity (calculated from existing data)
 class RecentActivityResponse(BaseSchema):
     id: int
@@ -28,9 +59,6 @@ class RecentActivityResponse(BaseSchema):
     doctor_id: Optional[int]
     status: str
     created_at: datetime
-
-
-
 
 
 # Doctor Profile (for dashboard)
@@ -45,14 +73,16 @@ class DoctorProfile(BaseSchema):
     total_appointments: int
     created_at: datetime
 
+
 # Dashboard Settings
 class DashboardSettings(BaseSchema):
-    refresh_interval: int = 30  # seconds
+    refresh_interval: int = 30  # minutes
     show_notifications: bool = True
     show_recent_activities: bool = True
     show_quick_actions: bool = True
     default_date_range: int = 30  # days
     theme: str = "light"
+
 
 class DashboardSettingsUpdate(BaseSchema):
     refresh_interval: Optional[int] = None

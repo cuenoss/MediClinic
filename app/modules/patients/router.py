@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, Depends, APIRouter, UploadFile, File
 from typing import Optional, List
 from app.db import get_db
@@ -9,31 +10,22 @@ from .schemas import (
     AttachedFileResponse, AttachedFileCreate,
     PatientCreate, PatientUpdate, PatientResponse, PatientSearchFilters, 
     ConsultationResponse,ConsultationCreate,
-    PrescriptionResponse
+    PrescriptionResponse,
+    process_comma_separated_field, parse_comma_separated_field
 )
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import mimetypes
 import os
 import uuid
 
 router = APIRouter(tags=["patients"])
 
-# Helper functions for comma-separated data
-def process_comma_separated_field(field_value: list[str] | str | None) -> str:
-    """Convert list or string to comma-separated string for storage"""
-    if not field_value:
-        return ""
-    
-    if isinstance(field_value, list):
-        return ", ".join([item.strip() for item in field_value if item.strip()])
-    
-    return str(field_value)
 
-def parse_comma_separated_field(field_value: str | None) -> list[str]:
-    """Convert comma-separated string to list for display"""
-    if not field_value:
-        return []
-    
-    return [item.strip() for item in field_value.split(',') if item.strip()]
+def _naive_utc(dt: datetime) -> datetime:
+    """TIMESTAMP WITHOUT TIME ZONE + asyncpg cannot bind timezone-aware datetimes."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 # File upload configuration
 ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif', '.txt', '.csv'}
@@ -124,9 +116,6 @@ async def create_patient(
         await db.commit()
         await db.refresh(new_patient)
 
-        if not new_patient:
-            raise HTTPException(status_code=500, detail="Failed to create patient")
-        
         return PatientResponse.model_validate(new_patient)
     except HTTPException:
         raise
@@ -180,7 +169,7 @@ async def delete_patient(
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
         
-        await db.delete(patient)
+        db.delete(patient)
         await db.commit()
         
         return {"message": "Patient deleted successfully"}
@@ -197,7 +186,7 @@ async def get_patient_consultations(
     db: AsyncSession = Depends(get_db)
 ) -> List[ConsultationResponse]:
     try:
-        result = await db.execute(select(Patient).where(Patient.id == patient_id))
+        result = await db.execute(select(Patient).where(Patient.id == patient_id).options(selectinload(Patient.consultations)))
         patient = result.scalars().first()
         
         if not patient:
@@ -208,6 +197,7 @@ async def get_patient_consultations(
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Error fetching consultations: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch consultations")
 
 # Add new consultation
@@ -224,14 +214,9 @@ async def create_consultation(
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
         
-        # Update patient with consultation data
-        update_data = consultation_data.dict(exclude_unset=True, exclude={'doctor_id', 'date', 'notes', 'main_complaint', 'problem_history', 'current_medications', 'symptoms_checklist', 'medical_history', 'family_medical_history', 'diagnosis'})
-        for key, value in update_data.items():
-            setattr(patient, key, value)
-        patient.updated_at = datetime.utcnow().date()
-        
-        # Create consultation
+        # Create consultation (ISO "Z" dates are UTC-aware; strip tz for TIMESTAMP WITHOUT TIME ZONE)
         consultation_date = consultation_data.date or datetime.utcnow()
+        consultation_date = _naive_utc(consultation_date)
         symptoms_str = ", ".join(consultation_data.symptoms_checklist) if consultation_data.symptoms_checklist else None
         new_consultation = Consultation(
             patient_id=patient_id,
@@ -334,12 +319,22 @@ async def upload_patient_file(
                 detail=f"Failed to save file: {str(e)}"
             )
         
+        # MIME type (model requires non-null file_type)
+        file_type = (file.content_type or "").strip() or None
+        if not file_type or file_type == "application/octet-stream":
+            guessed, _ = mimetypes.guess_type(file.filename)
+            if guessed:
+                file_type = guessed
+        if not file_type:
+            file_type = "application/octet-stream"
+
         # Save file record to database
         new_file = attached_files(
             patient_id=patient_id,
             file_name=file.filename,
             file_path=file_path,
-            created_at=datetime.utcnow()
+            file_type=file_type,
+            created_at=datetime.utcnow().date(),
         )
         
         db.add(new_file)
@@ -389,7 +384,7 @@ async def delete_patient_file(
             print(f"Warning: Failed to delete physical file {file_record.file_path}: {e}")
         
         # Delete database record
-        await db.delete(file_record)
+        db.delete(file_record)
         await db.commit()
         
         return {"message": "File deleted successfully"}
@@ -410,11 +405,15 @@ async def generate_prescription(
     query=select(Patient).where(Patient.id == patient_id)
     result = await db.execute(query)
     patient = result.scalars().first()
-    #calculate the age of the patient based on the date of birth
-    age=datetime.now().year-patient.date_of_birth.year if patient.date_of_birth else 0
-
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
+
+    # calculate the age of the patient based on the date of birth
+    age = (
+        datetime.now().year - patient.date_of_birth.year
+        if patient.date_of_birth
+        else 0
+    )
     
     return(PrescriptionResponse(
         patient_name=patient.full_name,

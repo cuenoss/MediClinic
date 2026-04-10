@@ -15,6 +15,7 @@ class Appointment(BaseModel):
     patient_id: int
     time: str
     duration: int
+    type: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True

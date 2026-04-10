@@ -12,6 +12,7 @@ class Appointment(Base):
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     time=Column(String, nullable=False)
     duration=Column(Integer, nullable=False)
+    type=Column(String, nullable=False)
 
 
     # Foreign key relationship with the patient table
