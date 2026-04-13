@@ -1,0 +1,88 @@
+import { createBrowserRouter } from "react-router-dom";
+import { MainLayout } from "./components/layouts/MainLayout";
+import { AuthLayout } from "./components/layouts/AuthLayout";
+import { LoginScreen } from "./components/auth/LoginScreen";
+import { RegisterScreen } from "./components/auth/RegisterScreen";
+import { PasswordResetScreen } from "./components/auth/PasswordResetScreen";
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { Dashboard } from "./components/dashboard/Dashboard";
+import { PatientList } from "./components/patients/PatientList";
+import { PatientProfile } from "./components/patients/PatientProfile";
+import { AppointmentCalendar } from "./components/appointments/AppointmentCalendar";
+import { AppointmentSchedule } from "./components/appointments/AppointmentSchedule";
+import { Settings } from "./components/settings/Settings";
+import { Finance } from "./components/finance/Finance";
+
+export const router = createBrowserRouter([
+  {
+    path: "/auth",
+    Component: AuthLayout,
+    children: [
+      { path: "login", Component: LoginScreen },
+      { path: "register", Component: RegisterScreen },
+      { path: "reset-password", Component: PasswordResetScreen },
+    ],
+  },
+  {
+    path: "/",
+    Component: MainLayout,
+    children: [
+      {
+        index: true,
+        element: (
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "patients",
+        element: (
+          <ProtectedRoute>
+            <PatientList />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "patients/:id",
+        element: (
+          <ProtectedRoute>
+            <PatientProfile />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "appointments",
+        element: (
+          <ProtectedRoute>
+            <AppointmentCalendar />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "appointments/schedule",
+        element: (
+          <ProtectedRoute>
+            <AppointmentSchedule />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "finance",
+        element: (
+          <ProtectedRoute>
+            <Finance />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "settings",
+        element: (
+          <ProtectedRoute>
+            <Settings />
+          </ProtectedRoute>
+        ),
+      },
+    ],
+  },
+]);
